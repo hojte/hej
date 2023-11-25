@@ -1,0 +1,140 @@
+#!/bin/bash
+
+set -e
+
+# Feel free to change these
+
+VERBOSE=0
+INTERACTIVE=1
+RESET=0
+
+if [[ $1 == "-r" ]]; then
+    RESET=1
+fi
+
+###################################################################
+#### No user-servicable parts below this line                  ####
+####                                                           ####
+#### ...but feel free to take a look. I'm a sign, not a cop.   ####
+###################################################################
+
+UPDATE_BASE="https://hackerakademi.dk/fenix"
+TOKEN_FILE="$HOME/.fenix-version"
+UPDATE_FILE="$HOME/.fenix-update.tar.gz"
+
+C_BLUE='\e[34;1m'
+C_GREEN='\e[32;1m'
+C_WHITE='\e[;1m'
+C_RESET='\e[m'
+
+function Info() { echo -e "${C_BLUE}[${C_GREEN}*${C_BLUE}] ${C_RESET}$*"; }
+function Line() { echo -e "    $*"; }
+
+function download()
+{
+    if [[ $VERBOSE == "1" ]]; then
+        Info "Running [curl ${@}].."
+        curl "${@}"
+    else
+        curl -s "${@}"
+    fi
+}
+
+function check_status()
+{
+    UPDATE_URL="$UPDATE_BASE/latest"
+
+    if [[ -r $TOKEN_FILE ]]; then
+        CURRENT=$(< $TOKEN_FILE)
+    else
+        CURRENT="images/FENIX_RELEASE_0.tar.gz"
+    fi
+
+    NEWEST=$(download -s $UPDATE_BASE/latest)
+    NEWEST=${NEWEST##$UPDATE_BASE/}
+}
+
+function prompt_user_yesno()
+{
+    read -p "$1" -r
+    echo ""
+    if [[ $REPLY == "" || $REPLY =~ ^[Yy] ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function list_update_files()
+{
+    Info "The following files will be replaced by this update:"
+    echo "--------------------------------------------------------------------------------"
+    tar -ztf ${UPDATE_FILE} | sed -re 's|^|~/|'
+    echo "--------------------------------------------------------------------------------"
+    echo "NOTE: Any changes you have made to these files will be LOST!"
+}
+
+function ask_and_extract_update()
+{
+    if [[ $INTERACTIVE == "1" ]]; then
+        list_update_files
+        if prompt_user_yesno "$1"; then
+            true
+        else
+            Info "To manually apply the update at a later time, run these command:"
+            Line ""
+            Line "cd $HOME"
+            Line "tar -zxvf ${UPDATE_FILE}"
+            Line ""
+            return 0
+        fi
+    fi
+    Info "Extracting files.."
+    tar -zxvf ${UPDATE_FILE}
+}
+
+function download_new()
+{
+    Info "Download update [$1]"
+    curl '-#' $UPDATE_BASE/$1 -o ${UPDATE_FILE}.tmp
+    mv -f ${UPDATE_FILE}.tmp ${UPDATE_FILE}
+    Info "Download complete"
+    ask_and_extract_update "Do you want to unpack the update now? [Y/n] "
+}
+
+function download_failed()
+{
+    echo ""
+    echo "Sorry, download failed :("
+    echo "Please try again later.."
+    false
+}
+
+function write_new_token()
+{
+    echo "$NEWEST" > $TOKEN_FILE
+}
+
+function already_have_newest()
+{
+    if [[ $RESET == 0 ]]; then
+        Info "You have the newest version of Fenix :)"
+        Line ""
+        Line "If you want to reset to a clean state, run this command:"
+        Line ""
+        Line "  $0 -r"
+        Line ""
+    else
+        ask_and_extract_update "Reset to latest update now? [Y/n] "
+    fi
+}
+
+check_status
+
+if [[ "$NEWEST" != "$CURRENT" ]]; then
+    Info "New version available"
+    download_new "$NEWEST" || download_failed
+    write_new_token
+else
+    already_have_newest
+fi
